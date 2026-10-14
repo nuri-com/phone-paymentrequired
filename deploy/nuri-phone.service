@@ -12,7 +12,9 @@ Environment=PHONE_PORT=4600
 Environment=PHONE_DATA_DIR=/opt/nuri-phone/data
 # repo stays root-owned (root does git pull); let the service user read the sha for /healthz
 Environment=GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/opt/nuri-phone
-ExecStart=/usr/local/bin/node /opt/nuri-phone/server.js
+# /usr/local/bin/node points into /root (mode 700), unreachable for the service user and under ProtectHome.
+# Hard link the binary (same inode, no extra disk): mkdir -p /usr/local/lib/nuri-phone && ln <real node> /usr/local/lib/nuri-phone/node
+ExecStart=/usr/local/lib/nuri-phone/node /opt/nuri-phone/server.js
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
