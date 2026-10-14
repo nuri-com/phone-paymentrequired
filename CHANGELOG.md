@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.1 (2026-10-14)
+- Prompt: finish_interview must come before end_call. Simulations still end after the email question (simulate-conversation does not execute MCP tools); verify on a real call.
+- Report: localized contact labels.
+
 ## v1.0.0 (2026-10-14)
 - MCP server with `interview_note`, `research_person`, `finish_interview` (bearer auth, one JSON log line per tool call).
 - Live operator page `/live` with 2 s polling and steering queue.
