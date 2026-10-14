@@ -5,10 +5,96 @@ An ElevenLabs voice agent interviews a participant by phone. This service is its
 it stores a note per answer, hands live operator instructions to the agent, does consent-gated
 public lookups, and after the call mails an own-words report (quotes, who they are, consent flags,
 full transcript) to support@nuri.com and, if they left an email, to the participant.
+For Nuri research operators who run and steer phone interviews.
 
 Node 22, stdlib only, no dependencies.
 
-## Flow
+## Logs
+
+- [CHANGELOG.md](CHANGELOG.md): release notes per version
+- [PROMPTLOG.md](PROMPTLOG.md): rules and prompts from emino
+
+## Status
+
+| Field | Value |
+|---|---|
+| Version | v1.1.1 |
+| Date | 2026-10-14 |
+| Updated by | hermes-agent for emino |
+| Default branch HEAD | `a3655574` (main) |
+| Runs at | https://phone.paymentrequired.com (systemd `nuri-phone` on box nuri-support, Caddy reverse proxy to 127.0.0.1:4600), fallback https://support.nuri.com/phone-mcp |
+
+## Architecture
+
+```mermaid
+flowchart TB
+  EL["ElevenLabs agent"] -->|"POST /mcp JSON-RPC, bearer"| CADDY["Caddy: phone.paymentrequired.com and support.nuri.com/phone-mcp"]
+  OP["Operator browser /live"] -->|"cookie op"| CADDY
+  PT["Participant browser /i/token"] --> CADDY
+  CADDY --> SRV["server.js http server 127.0.0.1:4600"]
+  SRV --> PAGES["pages.js: landing, llms.txt, live, personal page"]
+  SRV --> LIB["lib.js: JSON-lines store, llm, sendMail"]
+  SRV -->|"research_person"| GH["api.github.com and participant website"]
+  SRV -->|"finish_interview, 15 s later"| REP["report.js runReport"]
+  REP -->|"GET /v1/convai/conversations/id"| ELAPI["api.elevenlabs.io"]
+  REP --> LIB
+  LIB -->|"chat/completions"| ROUTER["router.paymentrequired.com/v1/internal or VOICE_LLM_UPSTREAM_URL"]
+  LIB -->|"POST /emails"| RESEND["api.resend.com"]
+  LIB --> DATA[("PHONE_DATA_DIR/conv_id.jsonl")]
+  SCRIPTS["scripts/el-*.mjs"] -->|"register MCP, create agent, simulate"| ELAPI
+```
+
+## User flow
+
+```mermaid
+sequenceDiagram
+  participant P as Participant
+  participant A as ElevenLabs agent
+  participant S as server.js
+  participant O as Operator /live
+  participant R as report.js
+  P->>A: calls the hotline and answers questions
+  A->>S: interview_note after every answer
+  O->>S: POST /api/steer with next instruction
+  S-->>A: operator_instruction, consumed once
+  A->>P: asks for permission to look them up
+  A->>S: research_person with consent true
+  S-->>A: research summary, max 120 words
+  A->>P: asks for email and attribution
+  A->>S: finish_interview
+  S->>R: runReport after 15 s
+  R->>R: fetch transcript, extract verbatim quotes
+  R-->>P: email with personal /i/token link
+  R-->>O: email report to support@nuri.com
+```
+
+## Components
+
+| Component | Path | Role |
+|---|---|---|
+| HTTP + MCP server | `server.js` | Routes, MCP tools, SSRF-guarded research, steering queue in memory |
+| Shared helpers | `lib.js` | Interview store (JSON lines), router LLM call with fallbacks, Resend email |
+| Report job | `report.js` | ElevenLabs transcript, quote extraction, emails; also a CLI |
+| Pages | `pages.js` | Landing, `/llms.txt`, live operator page, personal interview page |
+| Agent prompt | `prompt/interview-prompt.txt` | Exact interviewer prompt incl. `## TOOL RULES` |
+| EL MCP registration | `scripts/el-register-mcp.mjs` | Registers "Interview notes" MCP server in ElevenLabs |
+| EL agent creation | `scripts/el-create-agent.mjs` | Creates "Research Interview v3" agent |
+| EL simulation | `scripts/el-simulate.mjs` | Text-only simulated interviews into `evidence/` |
+| Simulation evidence | `evidence/` | Two simulate runs (EN founder, DE user) |
+| systemd unit | `deploy/nuri-phone.service` | Sandboxed service as user `nuri-phone` |
+| Caddy snippet | `deploy/Caddyfile.snippet` | Site block and `/phone-mcp` fallback path |
+| Agent rules | `AGENTS.md` | Rules for agents working in this repo |
+
+## Run
+
+```sh
+node --env-file=.env server.js                       # needs PHONE_MCP_TOKEN and PHONE_OPERATOR_TOKEN
+node --env-file=.env report.js <conversation_id> --print
+```
+
+No package.json, no build, no test suite in the repo.
+
+## Flow (call path)
 
 ```mermaid
 flowchart LR
@@ -26,7 +112,7 @@ flowchart LR
   M -->|"personal link"| I["/i/token page"]
 ```
 
-## Endpoints
+## API / Endpoints
 
 | Path | Auth | What |
 |---|---|---|
@@ -38,6 +124,8 @@ flowchart LR
 | `POST /api/steer` `{conversation_id, text}` | operator token/cookie | Queue an instruction for the next `interview_note`; `conversation_id: "*"` = next active call |
 | `GET /i/:token` | personal token | Participant's own interview |
 | `GET /`, `/llms.txt`, `/healthz` | none | Landing, machine summary, health with git sha |
+
+MCP also answers `notifications/*` with 202 and unknown methods with JSON-RPC error -32601. Server info name: `interview-notes`.
 
 ### MCP tools
 - `interview_note {conversation_id, person_said, agent_summary?, phase}` -> `{operator_instruction, research}`. Instruction is consumed once.
