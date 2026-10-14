@@ -223,11 +223,23 @@ async function dispatch(name, args) {
 }
 
 // ---------- http ----------
+const SEC_HEADERS = { "strict-transport-security": "max-age=31536000", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff" };
 const send = (res, code, body, type = "application/json", extra = {}) => {
-  res.writeHead(code, { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff", ...extra });
+  res.writeHead(code, { "content-type": type, "cache-control": "no-store", ...SEC_HEADERS, ...extra });
   res.end(typeof body === "string" ? body : JSON.stringify(body));
 };
-const readBody = async (req) => { let raw = ""; for await (const c of req) { raw += c; if (raw.length > 1e6) throw new Error("too large"); } return raw; };
+const MAX_REQ = 1e6;
+class TooLarge extends Error {}
+class BadJson extends Error {}
+const readBody = async (req) => {
+  if (Number(req.headers["content-length"]) > MAX_REQ) throw new TooLarge();
+  const chunks = []; let n = 0;
+  for await (const c of req) { n += c.length; if (n > MAX_REQ) throw new TooLarge(); chunks.push(c); }
+  return Buffer.concat(chunks).toString("utf8");
+};
+const readJson = async (req) => { const raw = await readBody(req); try { return JSON.parse(raw || "{}"); } catch { throw new BadJson(); } };
+// 413 and close: the rest of the oversized body is not read, so the connection cannot be reused.
+const tooLarge = (res) => send(res, 413, { error: "payload too large" }, "application/json", { connection: "close" });
 const cookieToken = (req) => (String(req.headers.cookie || "").match(/(?:^|;\s*)op=([a-f0-9]+)/) || [])[1];
 const opOk = (req, url) => eq(url.searchParams.get("token") || cookieToken(req), OP_TOKEN);
 
@@ -235,11 +247,14 @@ async function handleMcp(req, res) {
   if (!eq(req.headers.authorization, `Bearer ${MCP_TOKEN}`)) return send(res, 401, { jsonrpc: "2.0", error: { code: -32600, message: "unauthorized" } });
   if (req.method === "GET") return send(res, 200, { jsonrpc: "2.0", result: { tools: TOOLS } });
   let msg;
-  try { msg = JSON.parse(await readBody(req)); } catch { return send(res, 400, { jsonrpc: "2.0", error: { code: -32700, message: "parse error" } }); }
+  try { msg = JSON.parse(await readBody(req)); } catch (e) {
+    if (e instanceof TooLarge) return tooLarge(res);
+    return send(res, 400, { jsonrpc: "2.0", error: { code: -32700, message: "parse error" } });
+  }
   const id = msg.id ?? null;
   const reply = (obj) => send(res, 200, { jsonrpc: "2.0", ...(id !== null ? { id } : {}), ...obj });
   if (msg.method === "initialize") return reply({ result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "interview-notes", version: "1.0.0" } } });
-  if (typeof msg.method === "string" && msg.method.startsWith("notifications/")) { res.writeHead(202); return res.end(); }
+  if (typeof msg.method === "string" && msg.method.startsWith("notifications/")) { res.writeHead(202, SEC_HEADERS); return res.end(); }
   if (msg.method === "ping") return reply({ result: {} });
   if (msg.method === "tools/list") return reply({ result: { tools: TOOLS } });
   if (msg.method === "tools/call") {
@@ -277,7 +292,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && p === "/api/steer") {
       if (!opOk(req, url)) return send(res, 401, { error: "unauthorized" });
-      const b = JSON.parse(await readBody(req) || "{}");
+      const b = await readJson(req);
       const text = String(b.text || "").trim().slice(0, 1000);
       const cid = String(b.conversation_id || "*").replace(/[^A-Za-z0-9_*-]/g, "") || "*";
       if (!text) return send(res, 400, { error: "text required" });
@@ -294,6 +309,8 @@ const server = http.createServer(async (req, res) => {
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {
+    if (e instanceof TooLarge) return tooLarge(res);
+    if (e instanceof BadJson) return send(res, 400, { error: "invalid json" });
     log({ http: p, ok: false, error: String(e.message || e) });
     return send(res, 500, { error: "internal error" });
   }
