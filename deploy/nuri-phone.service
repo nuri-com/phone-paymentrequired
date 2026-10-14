@@ -1,0 +1,16 @@
+[Unit]
+Description=Nuri research interview phone tool (phone.paymentrequired.com)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/nuri-phone
+EnvironmentFile=/opt/nuri-phone/.env
+Environment=PHONE_PORT=4600
+Environment=PHONE_DATA_DIR=/opt/nuri-phone/data
+ExecStart=/usr/local/bin/node /opt/nuri-phone/server.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+# 1) New site block (append to /etc/caddy/Caddyfile)
+phone.paymentrequired.com {
+	reverse_proxy 127.0.0.1:4600
+}
+
+# 2) Fallback path inside the existing support.nuri.com block, BEFORE the catch-all `handle {`
+	@phone path /phone-mcp /phone-mcp/*
+	handle @phone {
+		reverse_proxy 127.0.0.1:4600
+	}
