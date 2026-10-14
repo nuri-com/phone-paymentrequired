@@ -364,7 +364,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", () => log({ msg: `nuri-phone on 127.0.0.1:${PORT}`, sha: SHA }));
 
 // Hang-up safety net: every 2 min, list conversations of our agent (since service start) at ElevenLabs; any that is done,
-// longer than 60 s and has no finish/report line in our store gets a report from whatever was said.
+// longer than 20 s and has no finish/report line in our store gets a report from whatever was said.
 // finish_interview stays the normal path.
 const AGENT_ID = process.env.PHONE_AGENT_ID;
 if (AGENT_ID && process.env.ELEVENLABS_API_KEY) {
@@ -373,7 +373,7 @@ if (AGENT_ID && process.env.ELEVENLABS_API_KEY) {
       { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY }, signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error(`conversations HTTP ${r.status}`);
     for (const c of (await r.json()).conversations || []) {
-      if (c.status !== "done" || (c.call_duration_secs || 0) < 60 || !CONV_RE.test(c.conversation_id)) continue;
+      if (c.status !== "done" || (c.call_duration_secs || 0) < 20 || !CONV_RE.test(c.conversation_id)) continue;
       const iv = readInterview(c.conversation_id);
       if (iv && (iv.finished || iv.report || iv.lines.some((l) => l.type === "report_error" || l.type === "hangup"))) continue;
       append(c.conversation_id, { type: "hangup", call_duration_secs: c.call_duration_secs, termination_reason: c.termination_reason || null });

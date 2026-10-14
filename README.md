@@ -53,7 +53,7 @@ Polls `GET /v1/convai/conversations/{id}` up to 3 min until done, asks the route
 
 ## Env (names only, values live in /opt/nuri-phone/.env, mode 600)
 
-`PHONE_MCP_TOKEN`, `PHONE_OPERATOR_TOKEN`, `ELEVENLABS_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_REPLY_TO`, `ROUTER_INTERNAL_KEY`, `VOICE_LLM_UPSTREAM_URL`, `VOICE_LLM_UPSTREAM_KEY`, `VOICE_LLM_UPSTREAM_MODEL`. Optional: `OPENROUTER_API_KEY` (web search in `research_person`; without it only GitHub/website lookups), `RESEARCH_MODEL` (default `perplexity/sonar`), `RESEARCH_SYNTH_MODEL` (default `openai/gpt-4.1-mini`), `PHONE_AGENT_ID` (enables the hang-up sweep: report for done calls over 60 s without `finish_interview`), `PHONE_PORT` (4600), `PHONE_DATA_DIR`, `REPORT_MODEL`, `REPORT_TO`, `PUBLIC_BASE_URL`.
+`PHONE_MCP_TOKEN`, `PHONE_OPERATOR_TOKEN`, `ELEVENLABS_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_REPLY_TO`, `ROUTER_INTERNAL_KEY`, `VOICE_LLM_UPSTREAM_URL`, `VOICE_LLM_UPSTREAM_KEY`, `VOICE_LLM_UPSTREAM_MODEL`. Optional: `OPENROUTER_API_KEY` (web search in `research_person`; without it only GitHub/website lookups), `RESEARCH_MODEL` (default `perplexity/sonar`), `RESEARCH_SYNTH_MODEL` (default `openai/gpt-4.1-mini`), `PHONE_AGENT_ID` (enables the hang-up sweep: report for done calls over 20 s without `finish_interview`), `PHONE_PORT` (4600), `PHONE_DATA_DIR`, `REPORT_MODEL`, `REPORT_TO`, `PUBLIC_BASE_URL`.
 
 State: one JSON-lines file per interview in `/opt/nuri-phone/data/` (dir mode 700). Steering queue is in memory.
 
