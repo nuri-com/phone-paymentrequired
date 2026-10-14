@@ -363,13 +363,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => log({ msg: `nuri-phone on 127.0.0.1:${PORT}`, sha: SHA }));
 
-// Hang-up safety net: every 2 min, list conversations of our agent (since service start) at ElevenLabs; any that is done,
+// Hang-up safety net: every 2 min, list the last hour of conversations of our agent at ElevenLabs (survives restarts); any that is done,
 // longer than 20 s and has no finish/report line in our store gets a report from whatever was said.
 // finish_interview stays the normal path.
 const AGENT_ID = process.env.PHONE_AGENT_ID;
 if (AGENT_ID && process.env.ELEVENLABS_API_KEY) {
   const sweep = async () => {
-    const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(AGENT_ID)}&page_size=20&call_start_after_unix=${Math.floor(Date.parse(STARTED) / 1000)}`,
+    const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(AGENT_ID)}&page_size=20&call_start_after_unix=${Math.floor(Date.now() / 1000) - 3600}`,
       { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY }, signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error(`conversations HTTP ${r.status}`);
     for (const c of (await r.json()).conversations || []) {
