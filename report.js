@@ -64,8 +64,8 @@ Rules: quotes must be verbatim from Participant lines, never from Interviewer li
   const date = new Date((conv.metadata?.start_time_unix_secs || Date.now() / 1000) * 1000).toISOString().slice(0, 10);
   const dur = conv.metadata?.call_duration_secs;
   const L = de
-    ? { said: "WAS DIE PERSON GESAGT HAT, IN IHREN WORTEN", who: "WER SIE IST, NACH IHREN EIGENEN ANGABEN", none: "Dazu hat die Person nichts gesagt.", contact: "KONTAKT UND EINWILLIGUNG", full: "VOLLSTÄNDIGES TRANSKRIPT", yes: "ja", no: "nein", unk: "nicht gefragt oder nicht beantwortet" }
-    : { said: "WHAT THE PERSON SAID, IN THEIR OWN WORDS", who: "WHO THEY ARE, IN THEIR OWN WORDS", none: "The person said nothing about this.", contact: "CONTACT AND CONSENT", full: "FULL TRANSCRIPT", yes: "yes", no: "no", unk: "not asked or not answered" };
+    ? { said: "WAS DIE PERSON GESAGT HAT, IN IHREN WORTEN", who: "WER SIE IST, NACH IHREN EIGENEN ANGABEN", none: "Dazu hat die Person nichts gesagt.", contact: "KONTAKT UND EINWILLIGUNG", full: "VOLLSTÄNDIGES TRANSKRIPT", yes: "ja", no: "nein", unk: "nicht gefragt oder nicht beantwortet", name: "Name", email: "E-Mail", attr: "Namensnennung erlaubt", look: "Online-Recherche erlaubt", src: "Quelle der Angaben", srcTool: "finish_interview", srcTr: "nur Transkript (kein finish_interview)" }
+    : { said: "WHAT THE PERSON SAID, IN THEIR OWN WORDS", who: "WHO THEY ARE, IN THEIR OWN WORDS", none: "The person said nothing about this.", contact: "CONTACT AND CONSENT", full: "FULL TRANSCRIPT", yes: "yes", no: "no", unk: "not asked or not answered", name: "Name", email: "Email", attr: "May attribute by name", look: "Consented to public lookup", src: "Source of flags", srcTool: "finish_interview tool", srcTr: "transcript only (no finish_interview call)" };
   const yn = (v) => (v === true ? L.yes : v === false ? L.no : L.unk);
   const email = fin.email || json.email_stated || null;
   const body = [
@@ -79,11 +79,11 @@ Rules: quotes must be verbatim from Participant lines, never from Interviewer li
     ...((json.who || []).length ? json.who.map((w) => noEmDash(w)) : [L.none]),
     "",
     L.contact,
-    `Name: ${fin.name || json.first_name || L.unk}`,
-    `Email: ${email || L.unk}`,
-    `May attribute by name: ${yn(fin.may_attribute ?? json.attribution_stated)}`,
-    `Consented to public lookup: ${yn(fin.consent_research)}`,
-    `Source of flags: ${interview?.finish ? "finish_interview tool" : "transcript only (no finish_interview call)"}`,
+    `${L.name}: ${fin.name || json.first_name || L.unk}`,
+    `${L.email}: ${email || L.unk}`,
+    `${L.attr}: ${yn(fin.may_attribute ?? json.attribution_stated)}`,
+    `${L.look}: ${yn(fin.consent_research)}`,
+    `${L.src}: ${interview?.finish ? L.srcTool : L.srcTr}`,
     "",
     L.full,
     transcript,
