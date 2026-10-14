@@ -163,26 +163,42 @@ function okUrl(u) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^https?:\/\//i.test(s)) throw new UrlRefused("url refused: only http and https");
   return /^https?:\/\//i.test(s) ? s : "https://" + s;
 }
-async function webResearch({ name, company, context }) {
+// OpenRouter chat call; perplexity/sonar does the web search, the synthesis model only reads.
+async function orChat(model, system, user, { max_tokens = 220, timeoutMs = 12000 } = {}) {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw new Error("web search not configured");
-  const who = [name, company, context].filter(Boolean).join(", ");
   const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-    signal: AbortSignal.timeout(12000),
-    body: JSON.stringify({
-      model: process.env.RESEARCH_MODEL || "perplexity/sonar",
-      max_tokens: 180,
-      messages: [
-        { role: "system", content: "You research a person for a phone interviewer, from public web sources only. The name was transcribed from speech and may be misspelled: search the given spelling and close variants (Amin/Emin, Mahrt/Mart/Maart, Jon/John, Meier/Meyer and so on), and use the context to pick the right person. Return at most 4 short plain lines, 80 words total: who they are, what they build or do, public roles, notable projects, recent public posts or talks. Start with the line: match: <name as written online>, <confidence high|medium|low>. No markdown, no citations. If nothing plausible exists, answer exactly: not found." },
-        { role: "user", content: who },
-      ],
-    }),
+    signal: AbortSignal.timeout(timeoutMs),
+    body: JSON.stringify({ model, max_tokens, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
   });
-  if (!r.ok) throw new Error(`search HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`${model} HTTP ${r.status}`);
   const j = await r.json();
   return String(j.choices?.[0]?.message?.content || "").replace(/\[\d+\]/g, "").replace(/\*\*/g, "").trim();
+}
+const SPELL = "The name was transcribed from speech and may be misspelled: search the given spelling and close variants (Amin/Emin, Mahrt/Mart/Maart, Jon/John, Meier/Meyer and so on) and use the context to pick the right person. Plain text, no markdown, no citations, max 70 words. If nothing plausible exists answer exactly: not found.";
+// Fan-out: 4 searchers run in parallel, each with one angle; one fast model folds them into hooks.
+const ANGLES = [
+  ["identity", "Who is this person: current role, company, city, one-line background. Start with: match: <name as written online>, <confidence high|medium|low>."],
+  ["public_voice", "Their most recent public posts, talks, interviews, podcast appearances or articles (last 2 years), with the concrete topic and where it appeared."],
+  ["work", "What they built or shipped: products, companies, open source, with names and years; what they are working on right now."],
+  ["money", "Anything public about their relationship with bitcoin, crypto, self-custody, wallets, exchanges, losses, hacks, banks or fintech: opinions, incidents, product choices."],
+];
+async function webResearch({ name, company, context }) {
+  const who = [name, company, context].filter(Boolean).join(", ");
+  const searchModel = process.env.RESEARCH_MODEL || "perplexity/sonar";
+  const t0 = Date.now();
+  const found = await Promise.allSettled(ANGLES.map(([, q]) => orChat(searchModel, `You research a person for a phone interviewer, public web sources only. ${q} ${SPELL}`, who, { max_tokens: 160 })));
+  const notes = found.map((r, i) => `${ANGLES[i][0]}: ${r.status === "fulfilled" ? r.value : "error " + r.reason?.message}`);
+  log({ research: "fanout", ms: Date.now() - t0, ok: found.filter((r) => r.status === "fulfilled").length });
+  if (!found.some((r) => r.status === "fulfilled" && !/^not found\.?$/i.test(r.value.trim()))) return "not found";
+  const sys = "You brief a phone interviewer, 30 seconds before the next question. Input: notes from four researchers about one person (may contain errors or not found). Output plain text, no markdown, max 110 words:\n" +
+    "match: <name as written online>, <confidence high|medium|low>\n" +
+    "facts: 2 lines, who they are and what they do\n" +
+    "hooks: 3 lines, each one concrete, surprising, personal thing from the notes the interviewer can quote (what, where it appeared, when), best first. Prefer things about money, bitcoin, loss, trust, building. Never invent; if the notes are thin, fewer hooks.";
+  try { return await orChat(process.env.RESEARCH_SYNTH_MODEL || "openai/gpt-4.1-mini", sys, notes.join("\n\n"), { max_tokens: 260, timeoutMs: 10000 }); }
+  catch (e) { log({ research: "synth_failed", error: String(e.message || e) }); return words(notes.join(" "), 110); }
 }
 async function research({ name, company, url, handle, context }) {
   const parts = [];
@@ -346,3 +362,24 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => log({ msg: `nuri-phone on 127.0.0.1:${PORT}`, sha: SHA }));
+
+// Hang-up safety net: every 2 min, list conversations of our agent (since service start) at ElevenLabs; any that is done,
+// longer than 60 s and has no finish/report line in our store gets a report from whatever was said.
+// finish_interview stays the normal path.
+const AGENT_ID = process.env.PHONE_AGENT_ID;
+if (AGENT_ID && process.env.ELEVENLABS_API_KEY) {
+  const sweep = async () => {
+    const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversations?agent_id=${encodeURIComponent(AGENT_ID)}&page_size=20&call_start_after_unix=${Math.floor(Date.parse(STARTED) / 1000)}`,
+      { headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY }, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error(`conversations HTTP ${r.status}`);
+    for (const c of (await r.json()).conversations || []) {
+      if (c.status !== "done" || (c.call_duration_secs || 0) < 60 || !CONV_RE.test(c.conversation_id)) continue;
+      const iv = readInterview(c.conversation_id);
+      if (iv && (iv.finished || iv.report || iv.lines.some((l) => l.type === "report_error" || l.type === "hangup"))) continue;
+      append(c.conversation_id, { type: "hangup", call_duration_secs: c.call_duration_secs, termination_reason: c.termination_reason || null });
+      try { const out = await runReport(c.conversation_id); log({ job: "report", via: "hangup", conversation_id: c.conversation_id, ok: true, ...out }); }
+      catch (e) { log({ job: "report", via: "hangup", conversation_id: c.conversation_id, ok: false, error: String(e.message || e) }); append(c.conversation_id, { type: "report_error", error: String(e.message || e) }); }
+    }
+  };
+  setInterval(() => sweep().catch((e) => log({ job: "sweep", ok: false, error: String(e.message || e) })), 120000).unref();
+}

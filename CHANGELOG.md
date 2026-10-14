@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0 (2026-10-14)
+- Research fan-out: `research_person` runs 4 `perplexity/sonar` searchers in parallel (identity, public voice, work, money) and folds them with `openai/gpt-4.1-mini` into match + 2 facts + 3 hooks (concrete public things the interviewer can quote). Still async in ElevenLabs, so the talking agent never waits.
+- Prompt: hooks are doors into the arc, one per question, never a list; 15 minutes if they have it, shorter if not.
+- Hang-up safety net: with `PHONE_AGENT_ID` set, a 2 min sweep reports every done call over 60 s that never reached `finish_interview`, from whatever was said.
+
 ## v1.3.0 (2026-10-14)
 - No waiting on lookups: MCP tool `research_person` runs in ElevenLabs `execution_mode: async` (result lands on a later turn while the agent keeps asking), `finish_interview` stays immediate; agent turn `speculative_turn: true`, `turn_eagerness: eager` (`scripts/el-tool-modes.mjs`).
 - Prompt: after the lookup the agent confirms the match in one sentence ("I found a <role> at <company>, is that you?") before using it; never narrates tool status; "not found" is dropped silently.

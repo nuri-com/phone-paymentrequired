@@ -41,7 +41,7 @@ flowchart LR
 
 ### MCP tools
 - `interview_note {conversation_id, person_said, agent_summary?, phase}` -> `{operator_instruction, research}`. Instruction is consumed once.
-- `research_person {conversation_id, consent, name?, company?, context?, url?, handle?}` -> `{research}` (<=110 words; runs async in ElevenLabs, result arrives on a later turn; web search via OpenRouter `perplexity/sonar` on name/company/context, plus GitHub API + website title/description). Refused unless `consent` is the boolean `true`.
+- `research_person {conversation_id, consent, name?, company?, context?, url?, handle?}` -> `{research}` (<=110 words; 4 parallel searchers (identity, public voice, work, money) folded into match + facts + 3 hooks; runs async in ElevenLabs, result arrives on a later turn; web search via OpenRouter `perplexity/sonar` on name/company/context, plus GitHub API + website title/description). Refused unless `consent` is the boolean `true`.
 - `finish_interview {conversation_id, email?, name?, may_attribute, consent_research}` -> stores flags, mints a personal token, runs the report 15 s later.
 
 The agent passes `{{system__conversation_id}}` as `conversation_id`. Every tool call without an id matching `^conv_[a-z0-9]+$` is refused with `isError`; there is no fallback and no guessing of the conversation.
@@ -53,7 +53,7 @@ Polls `GET /v1/convai/conversations/{id}` up to 3 min until done, asks the route
 
 ## Env (names only, values live in /opt/nuri-phone/.env, mode 600)
 
-`PHONE_MCP_TOKEN`, `PHONE_OPERATOR_TOKEN`, `ELEVENLABS_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_REPLY_TO`, `ROUTER_INTERNAL_KEY`, `VOICE_LLM_UPSTREAM_URL`, `VOICE_LLM_UPSTREAM_KEY`, `VOICE_LLM_UPSTREAM_MODEL`. Optional: `OPENROUTER_API_KEY` (web search in `research_person`; without it only GitHub/website lookups), `RESEARCH_MODEL` (default `perplexity/sonar`), `PHONE_PORT` (4600), `PHONE_DATA_DIR`, `REPORT_MODEL`, `REPORT_TO`, `PUBLIC_BASE_URL`.
+`PHONE_MCP_TOKEN`, `PHONE_OPERATOR_TOKEN`, `ELEVENLABS_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM`, `RESEND_REPLY_TO`, `ROUTER_INTERNAL_KEY`, `VOICE_LLM_UPSTREAM_URL`, `VOICE_LLM_UPSTREAM_KEY`, `VOICE_LLM_UPSTREAM_MODEL`. Optional: `OPENROUTER_API_KEY` (web search in `research_person`; without it only GitHub/website lookups), `RESEARCH_MODEL` (default `perplexity/sonar`), `RESEARCH_SYNTH_MODEL` (default `openai/gpt-4.1-mini`), `PHONE_AGENT_ID` (enables the hang-up sweep: report for done calls over 60 s without `finish_interview`), `PHONE_PORT` (4600), `PHONE_DATA_DIR`, `REPORT_MODEL`, `REPORT_TO`, `PUBLIC_BASE_URL`.
 
 State: one JSON-lines file per interview in `/opt/nuri-phone/data/` (dir mode 700). Steering queue is in memory.
 
