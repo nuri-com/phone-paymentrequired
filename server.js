@@ -173,9 +173,9 @@ async function webResearch({ name, company, context }) {
     signal: AbortSignal.timeout(12000),
     body: JSON.stringify({
       model: process.env.RESEARCH_MODEL || "perplexity/sonar",
-      max_tokens: 260,
+      max_tokens: 180,
       messages: [
-        { role: "system", content: "You research a person for a phone interviewer, from public web sources only. The name was transcribed from speech and may be misspelled: search the given spelling and close variants (Amin/Emin, Mahrt/Mart/Maart, Jon/John, Meier/Meyer and so on), and use the context to pick the right person. Return at most 5 short plain lines: who they are, what they build or do, public roles, notable projects, recent public posts or talks. Start with the line: match: <name as written online>, <confidence high|medium|low>. No markdown, no citations. If nothing plausible exists, answer exactly: not found." },
+        { role: "system", content: "You research a person for a phone interviewer, from public web sources only. The name was transcribed from speech and may be misspelled: search the given spelling and close variants (Amin/Emin, Mahrt/Mart/Maart, Jon/John, Meier/Meyer and so on), and use the context to pick the right person. Return at most 4 short plain lines, 80 words total: who they are, what they build or do, public roles, notable projects, recent public posts or talks. Start with the line: match: <name as written online>, <confidence high|medium|low>. No markdown, no citations. If nothing plausible exists, answer exactly: not found." },
         { role: "user", content: who },
       ],
     }),
@@ -209,7 +209,7 @@ async function research({ name, company, url, handle, context }) {
     } catch (e) { if (e instanceof UrlRefused) throw e; parts.push(`Website lookup failed: ${e.message}.`); }
   }
   if (!parts.length) parts.push(`No url or GitHub handle given${name || company ? ` for ${[name, company].filter(Boolean).join(", ")}` : ""}; nothing looked up. Ask for a website or GitHub name if useful.`);
-  return words(parts.join(" "), 220);
+  return words(parts.join(" "), 110);
 }
 
 // ---------- tool dispatch ----------
