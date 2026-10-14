@@ -41,7 +41,7 @@ flowchart LR
 
 ### MCP tools
 - `interview_note {conversation_id, person_said, agent_summary?, phase}` -> `{operator_instruction, research}`. Instruction is consumed once.
-- `research_person {conversation_id, consent, name?, company?, context?, url?, handle?}` -> `{research}` (<=220 words; web search via OpenRouter `perplexity/sonar` on name/company/context, plus GitHub API + website title/description). Refused unless `consent` is the boolean `true`.
+- `research_person {conversation_id, consent, name?, company?, context?, url?, handle?}` -> `{research}` (<=110 words; runs async in ElevenLabs, result arrives on a later turn; web search via OpenRouter `perplexity/sonar` on name/company/context, plus GitHub API + website title/description). Refused unless `consent` is the boolean `true`.
 - `finish_interview {conversation_id, email?, name?, may_attribute, consent_research}` -> stores flags, mints a personal token, runs the report 15 s later.
 
 The agent passes `{{system__conversation_id}}` as `conversation_id`. Every tool call without an id matching `^conv_[a-z0-9]+$` is refused with `isError`; there is no fallback and no guessing of the conversation.
@@ -78,6 +78,8 @@ ElevenLabs wiring (on the box, keys from .env):
 node --env-file=.env scripts/el-register-mcp.mjs        # "Interview notes" MCP, auto_approve_all, tools readback
 node --env-file=.env scripts/el-create-agent.mjs        # "Research Interview v3", clone of the test interviewer
 node --env-file=.env scripts/el-simulate.mjs <agent_id> evidence
+node --env-file=.env scripts/el-tool-modes.mjs            # research_person async, finish_interview immediate, speculative turn
+node --env-file=.env scripts/el-ws-chat.mjs emin [llm]    # text chat over the real agent socket, runs real MCP tools, prints latency
 ```
 
 If a real call fails with ElevenLabs error 3000 (agent flagged unsafe): `el-register-mcp.mjs --url https://support.nuri.com/phone-mcp --new`, then `el-create-agent.mjs --new`.

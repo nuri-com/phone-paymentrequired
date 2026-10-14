@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0 (2026-10-14)
+- No waiting on lookups: MCP tool `research_person` runs in ElevenLabs `execution_mode: async` (result lands on a later turn while the agent keeps asking), `finish_interview` stays immediate; agent turn `speculative_turn: true`, `turn_eagerness: eager` (`scripts/el-tool-modes.mjs`).
+- Prompt: after the lookup the agent confirms the match in one sentence ("I found a <role> at <company>, is that you?") before using it; never narrates tool status; "not found" is dropped silently.
+- Research summary cut to 80 words (max_tokens 180) so the next LLM turn stays short.
+- `scripts/el-ws-chat.mjs <persona> [llm]`: scripted text conversation over the real agent WebSocket (executes the real MCP tools, unlike simulate-conversation); prints per-turn ttfb and full latency. Measured on the live agent: gpt-5.5 ttfb median 1.5 s, gemini-3-flash-preview 2.0 s, claude-sonnet-5-5 2.1 to 2.6 s.
+
 ## v1.2.0 (2026-10-14)
 - `research_person` searches the web (OpenRouter `perplexity/sonar`, ~3 s) from name, company and context; before it only worked with a GitHub handle or URL, so on real calls the agent reported no web access.
 - `interview_note` no longer advertised in `tools/list` (models called it every turn: 2 to 10 s per turn).
