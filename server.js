@@ -57,14 +57,15 @@ const TOOLS = [
     description:
       "Looks up public information about the participant or their project, read-only. ONLY call this after the participant explicitly said yes to a question like " +
       "'May I quickly look up your project online?'. Ask that permission first. If they did not clearly agree, do not call it. " +
-      "Pass consent=true only on that clear yes. Give a website url, a GitHub handle, a company or a name. Returns a short plain summary. Use it to ask a better question; do not read it out.",
+      "Pass consent=true only on that clear yes. A name is enough; add company, context, website or GitHub handle when you have them. Searches the web. Returns a short plain summary. Use it to ask a better question; do not read it out.",
     inputSchema: {
       type: "object",
       properties: {
         conversation_id: { type: "string" },
         consent: { type: "boolean", description: "true only if the participant clearly said yes to being looked up. Without true the lookup is refused." },
-        name: { type: "string" },
-        company: { type: "string" },
+        name: { type: "string", description: "Full name as they said it. A name alone is enough for a web search." },
+        company: { type: "string", description: "Company or project, if mentioned." },
+        context: { type: "string", description: "What they told you about themselves so far, one line, to disambiguate the search." },
         url: { type: "string", description: "Website the participant mentioned." },
         handle: { type: "string", description: "GitHub username the participant mentioned." },
       },
@@ -162,8 +163,33 @@ function okUrl(u) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^https?:\/\//i.test(s)) throw new UrlRefused("url refused: only http and https");
   return /^https?:\/\//i.test(s) ? s : "https://" + s;
 }
-async function research({ name, company, url, handle }) {
+async function webResearch({ name, company, context }) {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw new Error("web search not configured");
+  const who = [name, company, context].filter(Boolean).join(", ");
+  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    signal: AbortSignal.timeout(12000),
+    body: JSON.stringify({
+      model: process.env.RESEARCH_MODEL || "perplexity/sonar",
+      max_tokens: 260,
+      messages: [
+        { role: "system", content: "You research a person for an interviewer, from public web sources only. Return at most 5 short plain lines: who they are, what they build or do, public roles, notable projects, recent public posts or talks. No markdown, no citations, no speculation. If you cannot find the person with confidence, answer exactly: not found." },
+        { role: "user", content: who },
+      ],
+    }),
+  });
+  if (!r.ok) throw new Error(`search HTTP ${r.status}`);
+  const j = await r.json();
+  return String(j.choices?.[0]?.message?.content || "").replace(/\[\d+\]/g, "").trim();
+}
+async function research({ name, company, url, handle, context }) {
   const parts = [];
+  if (name || company) {
+    try { parts.push(await webResearch({ name, company, context })); }
+    catch (e) { parts.push(`Web search failed: ${e.message}.`); }
+  }
   const h = String(handle || "").replace(/^@/, "").trim();
   if (/^[A-Za-z0-9-]{1,39}$/.test(h)) {
     try {
@@ -183,7 +209,7 @@ async function research({ name, company, url, handle }) {
     } catch (e) { if (e instanceof UrlRefused) throw e; parts.push(`Website lookup failed: ${e.message}.`); }
   }
   if (!parts.length) parts.push(`No url or GitHub handle given${name || company ? ` for ${[name, company].filter(Boolean).join(", ")}` : ""}; nothing looked up. Ask for a website or GitHub name if useful.`);
-  return words(parts.join(" "), 120);
+  return words(parts.join(" "), 220);
 }
 
 // ---------- tool dispatch ----------
@@ -202,7 +228,7 @@ async function dispatch(name, args) {
     } else if (name === "research_person") {
       if (args.consent !== true) throw new Error("research_person refused: consent must be true (ask the participant first and only call after a clear yes)");
       const summary = await research(args);
-      append(cid, { type: "research", query: { name: args.name, company: args.company, url: args.url, handle: args.handle }, summary });
+      append(cid, { type: "research", query: { name: args.name, company: args.company, context: args.context, url: args.url, handle: args.handle }, summary });
       out = { research: summary };
     } else if (name === "finish_interview") {
       const personal_token = newToken(20);
