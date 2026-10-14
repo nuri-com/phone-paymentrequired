@@ -65,6 +65,7 @@ cd /opt/nuri-phone && mkdir -p data && chmod 700 data
 # .env once: grep the shared keys from /opt/nuri-support/.env, add two fresh tokens (openssl rand -hex 24), chmod 600
 useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin nuri-phone   # once
 chown -R nuri-phone:nuri-phone data && chown nuri-phone:nuri-phone .env && chmod 600 .env
+mkdir -p /usr/local/lib/nuri-phone && ln "$(readlink -f /usr/local/bin/node)" /usr/local/lib/nuri-phone/node   # node binary outside /root
 cp deploy/nuri-phone.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now nuri-phone
 # Caddy: add deploy/Caddyfile.snippet, then
 caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
