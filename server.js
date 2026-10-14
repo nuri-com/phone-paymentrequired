@@ -90,6 +90,8 @@ const TOOLS = [
     },
   },
 ];
+// interview_note stays callable but is not advertised: per-turn calls cost 2 to 10 s per turn on real calls.
+const LISTED = TOOLS.filter((t) => t.name !== "interview_note");
 
 // ---------- research (read-only, public) ----------
 const stripHtml = (h) => String(h).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
@@ -245,7 +247,7 @@ const opOk = (req, url) => eq(url.searchParams.get("token") || cookieToken(req),
 
 async function handleMcp(req, res) {
   if (!eq(req.headers.authorization, `Bearer ${MCP_TOKEN}`)) return send(res, 401, { jsonrpc: "2.0", error: { code: -32600, message: "unauthorized" } });
-  if (req.method === "GET") return send(res, 200, { jsonrpc: "2.0", result: { tools: TOOLS } });
+  if (req.method === "GET") return send(res, 200, { jsonrpc: "2.0", result: { tools: LISTED } });
   let msg;
   try { msg = JSON.parse(await readBody(req)); } catch (e) {
     if (e instanceof TooLarge) return tooLarge(res);
@@ -256,7 +258,7 @@ async function handleMcp(req, res) {
   if (msg.method === "initialize") return reply({ result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "interview-notes", version: "1.0.0" } } });
   if (typeof msg.method === "string" && msg.method.startsWith("notifications/")) { res.writeHead(202, SEC_HEADERS); return res.end(); }
   if (msg.method === "ping") return reply({ result: {} });
-  if (msg.method === "tools/list") return reply({ result: { tools: TOOLS } });
+  if (msg.method === "tools/list") return reply({ result: { tools: LISTED } });
   if (msg.method === "tools/call") {
     try {
       const out = await dispatch(msg.params?.name, msg.params?.arguments || {});
