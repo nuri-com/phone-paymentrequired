@@ -40,11 +40,11 @@ flowchart LR
 | `GET /`, `/llms.txt`, `/healthz` | none | Landing, machine summary, health with git sha |
 
 ### MCP tools
-- `interview_note {conversation_id?, person_said, agent_summary?, phase}` -> `{operator_instruction, research}`. Instruction is consumed once.
-- `research_person {name?, company?, url?, handle?}` -> `{research}` (<=120 words; GitHub API + website title/description; private IPs refused).
-- `finish_interview {conversation_id?, email?, name?, may_attribute, consent_research}` -> stores flags, mints a personal token, runs the report 15 s later.
+- `interview_note {conversation_id, person_said, agent_summary?, phase}` -> `{operator_instruction, research}`. Instruction is consumed once.
+- `research_person {conversation_id, consent, name?, company?, url?, handle?}` -> `{research}` (<=120 words; GitHub API + website title/description). Refused unless `consent` is the boolean `true`.
+- `finish_interview {conversation_id, email?, name?, may_attribute, consent_research}` -> stores flags, mints a personal token, runs the report 15 s later.
 
-The agent passes `{{system__conversation_id}}` as `conversation_id`. If it is missing, the server reuses the most recent active interview (20 min) or mints `local_*`; `report.js` then maps it to the ElevenLabs conversation that started just before.
+The agent passes `{{system__conversation_id}}` as `conversation_id`. Every tool call without an id matching `^conv_[a-z0-9]+$` is refused with `isError`; there is no fallback and no guessing of the conversation.
 
 ## Report
 
@@ -63,6 +63,8 @@ State: one JSON-lines file per interview in `/opt/nuri-phone/data/` (dir mode 70
 git clone https://github.com/nuri-com/phone-paymentrequired /opt/nuri-phone   # or: cd /opt/nuri-phone && git pull
 cd /opt/nuri-phone && mkdir -p data && chmod 700 data
 # .env once: grep the shared keys from /opt/nuri-support/.env, add two fresh tokens (openssl rand -hex 24), chmod 600
+useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin nuri-phone   # once
+chown -R nuri-phone:nuri-phone data && chown nuri-phone:nuri-phone .env && chmod 600 .env
 cp deploy/nuri-phone.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now nuri-phone
 # Caddy: add deploy/Caddyfile.snippet, then
 caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
@@ -84,6 +86,15 @@ If a real call fails with ElevenLabs error 3000 (agent flagged unsafe): `el-regi
 ```sh
 cd /opt/nuri-phone && git checkout <previous sha> && systemctl restart nuri-phone
 ```
+
+## Security
+
+- Runs as system user `nuri-phone` with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`; only `/opt/nuri-phone/data` is writable. The repo stays root-owned.
+- `research_person` fetches only `http`/`https` on ports 80/443. Every hop is resolved with DNS (all addresses) and refused if any address is loopback, private, link-local (incl. 169.254.169.254), CGNAT, ULA, multicast or reserved, for IPv4 and IPv6. The connection is pinned to the checked address, redirects are followed manually (max 3, each re-checked), bodies stop at 512 KB, timeout 8 s.
+- `research_person` needs `consent: true` server-side; the prompt rule alone is not trusted.
+- Tool calls need a real `conv_` id; reports are only built for that exact ElevenLabs conversation.
+- Request bodies over 1 MB get `413` and the connection is closed. Bad JSON gets `400`.
+- All responses carry `Strict-Transport-Security`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`.
 
 ## Prompt
 
