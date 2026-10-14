@@ -182,7 +182,7 @@ async function webResearch({ name, company, context }) {
   });
   if (!r.ok) throw new Error(`search HTTP ${r.status}`);
   const j = await r.json();
-  return String(j.choices?.[0]?.message?.content || "").replace(/\[\d+\]/g, "").trim();
+  return String(j.choices?.[0]?.message?.content || "").replace(/\[\d+\]/g, "").replace(/\*\*/g, "").trim();
 }
 async function research({ name, company, url, handle, context }) {
   const parts = [];
