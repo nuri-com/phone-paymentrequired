@@ -1,6 +1,9 @@
 // phone.paymentrequired.com: research-interview MCP + live operator page + own-words report.
 // Node 22 stdlib only. Env names: see README.
 import http from "node:http";
+import https from "node:https";
+import net from "node:net";
+import { lookup } from "node:dns/promises";
 import { execSync } from "node:child_process";
 import { timingSafeEqual } from "node:crypto";
 import { append, readInterview, listInterviews, findByPersonalToken, newToken } from "./lib.js";
@@ -54,16 +57,18 @@ const TOOLS = [
     description:
       "Looks up public information about the participant or their project, read-only. ONLY call this after the participant explicitly said yes to a question like " +
       "'May I quickly look up your project online?'. Ask that permission first. If they did not clearly agree, do not call it. " +
-      "Give a website url, a GitHub handle, a company or a name. Returns a short plain summary. Use it to ask a better question; do not read it out.",
+      "Pass consent=true only on that clear yes. Give a website url, a GitHub handle, a company or a name. Returns a short plain summary. Use it to ask a better question; do not read it out.",
     inputSchema: {
       type: "object",
       properties: {
         conversation_id: { type: "string" },
+        consent: { type: "boolean", description: "true only if the participant clearly said yes to being looked up. Without true the lookup is refused." },
         name: { type: "string" },
         company: { type: "string" },
         url: { type: "string", description: "Website the participant mentioned." },
         handle: { type: "string", description: "GitHub username the participant mentioned." },
       },
+      required: ["consent"],
     },
   },
   {
@@ -89,18 +94,71 @@ const TOOLS = [
 // ---------- research (read-only, public) ----------
 const stripHtml = (h) => String(h).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
 const words = (s, n) => s.split(/\s+/).slice(0, n).join(" ");
+// Outbound fetch for research: http/https on ports 80/443 only, every hop resolved and checked
+// against private/loopback/link-local/metadata ranges, connection pinned to the checked address
+// (no DNS rebinding), manual redirects (max 3), body capped at 512 KB.
+const MAX_BODY = 512 * 1024, MAX_HOPS = 3;
+const BLOCKED = new net.BlockList();
+for (const [a, p] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24],
+  ["192.0.2.0", 24], ["192.88.99.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4]]) BLOCKED.addSubnet(a, p, "ipv4");
+for (const [a, p] of [["::", 128], ["::1", 128], ["64:ff9b::", 96], ["64:ff9b:1::", 48], ["100::", 64], ["2001::", 32], ["2001:db8::", 32], ["2002::", 16],
+  ["fc00::", 7], ["fe80::", 10], ["fec0::", 10], ["ff00::", 8]]) BLOCKED.addSubnet(a, p, "ipv6");
+class UrlRefused extends Error {}
+const isBlocked = (ip) => { const f = net.isIP(ip); return !f || BLOCKED.check(ip, f === 6 ? "ipv6" : "ipv4"); };
+
+async function checkUrl(raw) {
+  let u;
+  try { u = new URL(raw); } catch { throw new Error("invalid url"); }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new UrlRefused(`url refused: scheme ${u.protocol}`);
+  if (u.port && u.port !== "80" && u.port !== "443") throw new UrlRefused(`url refused: port ${u.port}`);
+  if (u.username || u.password) throw new UrlRefused("url refused: credentials in url");
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  const addrs = net.isIP(host) ? [{ address: host, family: net.isIP(host) }] : await lookup(host, { all: true, verbatim: true });
+  if (!addrs.length) throw new Error(`${host} did not resolve`);
+  const bad = addrs.find((a) => isBlocked(a.address));
+  if (bad) throw new UrlRefused(`url refused: ${host} resolves to a non-public address`);
+  return { u, host, addr: addrs[0] };
+}
+
+function getOnce({ u, host, addr }, accept, signal) {
+  return new Promise((resolve, reject) => {
+    const mod = u.protocol === "https:" ? https : http;
+    const req = mod.request({
+      protocol: u.protocol, hostname: host, port: u.port || (u.protocol === "https:" ? 443 : 80), path: u.pathname + u.search, method: "GET",
+      headers: { "user-agent": "nuri-phone-research/1", accept, host: u.host }, signal,
+      ...(net.isIP(host) ? {} : { servername: host }),
+      lookup: (_h, o, cb) => (o && o.all ? cb(null, [addr]) : cb(null, addr.address, addr.family)),
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) { res.destroy(); return resolve({ redirect: res.headers.location, status: res.statusCode }); }
+      const chunks = []; let n = 0;
+      res.on("data", (c) => { if (n >= MAX_BODY) return; chunks.push(c); n += c.length; if (n >= MAX_BODY) { res.destroy(); finish(); } });
+      res.on("end", () => finish());
+      res.on("error", (e) => (n >= MAX_BODY ? finish() : reject(e)));
+      let done = false;
+      function finish() { if (done) return; done = true; resolve({ status: res.statusCode, body: Buffer.concat(chunks).subarray(0, MAX_BODY).toString("utf8") }); }
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 async function getText(url, json = false) {
-  const r = await fetch(url, { headers: { "user-agent": "nuri-phone-research/1", accept: json ? "application/json" : "text/html,*/*" }, signal: AbortSignal.timeout(8000), redirect: "follow" });
-  if (!r.ok) throw new Error(`${new URL(url).host} HTTP ${r.status}`);
-  return json ? r.json() : (await r.text()).slice(0, 400000);
+  const signal = AbortSignal.timeout(8000);
+  let next = url;
+  for (let hop = 0; hop <= MAX_HOPS; hop++) {
+    const target = await checkUrl(next);
+    const r = await getOnce(target, json ? "application/json" : "text/html,*/*", signal);
+    if (r.redirect) { next = new URL(r.redirect, target.u).toString(); continue; }
+    if (r.status < 200 || r.status > 299) throw new Error(`${target.u.host} HTTP ${r.status}`);
+    return json ? JSON.parse(r.body) : r.body;
+  }
+  throw new Error(`too many redirects (max ${MAX_HOPS})`);
 }
 function okUrl(u) {
-  try {
-    const x = new URL(/^https?:\/\//.test(u) ? u : "https://" + u);
-    if (!/^https?:$/.test(x.protocol)) return null;
-    if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.|\[)/.test(x.hostname)) return null;
-    return x.toString();
-  } catch { return null; }
+  const s = String(u || "").trim();
+  if (!s) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^https?:\/\//i.test(s)) throw new UrlRefused("url refused: only http and https");
+  return /^https?:\/\//i.test(s) ? s : "https://" + s;
 }
 async function research({ name, company, url, handle }) {
   const parts = [];
@@ -111,7 +169,7 @@ async function research({ name, company, url, handle }) {
       parts.push(`GitHub ${u.login}: ${[u.name, u.bio, u.company, u.location].filter(Boolean).join(", ")}; ${u.public_repos} public repos, ${u.followers} followers.`);
       const repos = await getText(`https://api.github.com/users/${h}/repos?sort=updated&per_page=5`, true);
       if (Array.isArray(repos) && repos.length) parts.push("Recent repos: " + repos.map((r) => `${r.name}${r.description ? " (" + words(r.description, 12) + ")" : ""}`).join("; ") + ".");
-    } catch (e) { parts.push(`GitHub lookup failed: ${e.message}.`); }
+    } catch (e) { if (e instanceof UrlRefused) throw e; parts.push(`GitHub lookup failed: ${e.message}.`); }
   }
   const target = okUrl(url || "") || (company && /\./.test(company) ? okUrl(company) : null);
   if (target) {
@@ -120,7 +178,7 @@ async function research({ name, company, url, handle }) {
       const title = (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "";
       const desc = (html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)/i) || [])[1] || "";
       parts.push(`${new URL(target).host}: ${[title.trim(), desc.trim()].map((x) => x.replace(/&amp;/g, "&")).filter(Boolean).join(". ")}. ${words(stripHtml(html), 60)}`);
-    } catch (e) { parts.push(`Website lookup failed: ${e.message}.`); }
+    } catch (e) { if (e instanceof UrlRefused) throw e; parts.push(`Website lookup failed: ${e.message}.`); }
   }
   if (!parts.length) parts.push(`No url or GitHub handle given${name || company ? ` for ${[name, company].filter(Boolean).join(", ")}` : ""}; nothing looked up. Ask for a website or GitHub name if useful.`);
   return words(parts.join(" "), 120);
@@ -140,6 +198,7 @@ async function dispatch(name, args) {
       const lastResearch = readInterview(cid)?.lines.filter((l) => l.type === "research").at(-1)?.summary || null;
       out = { operator_instruction: pending, research: lastResearch, conversation_id: cid };
     } else if (name === "research_person") {
+      if (args.consent !== true) throw new Error("research_person refused: consent must be true (ask the participant first and only call after a clear yes)");
       lastActive.id = cid; lastActive.at = Date.now();
       const summary = await research(args);
       append(cid, { type: "research", query: { name: args.name, company: args.company, url: args.url, handle: args.handle }, summary });
