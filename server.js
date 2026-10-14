@@ -23,14 +23,14 @@ const log = (o) => console.log(JSON.stringify({ ts: new Date().toISOString(), ..
 
 // Pending operator instructions per conversation (in memory; consumed once). "*" = next active interview.
 const steer = new Map();
-const lastActive = { id: null, at: 0 };
 
-function resolveCid(given) {
-  const g = String(given || "").trim();
-  if (/^[A-Za-z0-9_-]{6,80}$/.test(g) && !/\{\{/.test(g)) return g;
-  // no usable id: reuse the most recent active interview for 20 min, else start a local one
-  if (lastActive.id && Date.now() - lastActive.at < 20 * 60 * 1000) return lastActive.id;
-  return "local_" + new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14) + "_" + newToken(3);
+// Every tool call must carry the ElevenLabs conversation id ({{system__conversation_id}}). No fallback:
+// guessing an id could attach notes or reports to the wrong caller.
+const CONV_RE = /^conv_[a-z0-9]+$/;
+function requireCid(given) {
+  const g = String(given ?? "").trim();
+  if (!CONV_RE.test(g)) throw new Error("conversation_id missing or invalid: pass {{system__conversation_id}} (format conv_<lowercase letters and digits>)");
+  return g;
 }
 
 const TOOLS = [
@@ -44,12 +44,12 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        conversation_id: { type: "string", description: "The conversation id given in your instructions (starts with conv_), if known." },
+        conversation_id: { type: "string", description: "Required: the conversation id given in your instructions (starts with conv_)." },
         person_said: { type: "string", description: "What the participant just said, close to their own words." },
         agent_summary: { type: "string", description: "Optional: one short line on what this answer means for the next question." },
         phase: { type: "string", description: "Current phase, e.g. opening, warmup, persona, threads, closing." },
       },
-      required: ["person_said", "phase"],
+      required: ["conversation_id", "person_said", "phase"],
     },
   },
   {
@@ -68,7 +68,7 @@ const TOOLS = [
         url: { type: "string", description: "Website the participant mentioned." },
         handle: { type: "string", description: "GitHub username the participant mentioned." },
       },
-      required: ["consent"],
+      required: ["conversation_id", "consent"],
     },
   },
   {
@@ -86,7 +86,7 @@ const TOOLS = [
         may_attribute: { type: "boolean" },
         consent_research: { type: "boolean" },
       },
-      required: ["may_attribute", "consent_research"],
+      required: ["conversation_id", "may_attribute", "consent_research"],
     },
   },
 ];
@@ -187,11 +187,11 @@ async function research({ name, company, url, handle }) {
 // ---------- tool dispatch ----------
 async function dispatch(name, args) {
   const t0 = Date.now();
-  const cid = resolveCid(args.conversation_id);
+  let cid = null;
   try {
+    cid = requireCid(args.conversation_id);
     let out;
     if (name === "interview_note") {
-      lastActive.id = cid; lastActive.at = Date.now();
       append(cid, { type: "turn", person_said: String(args.person_said || "").slice(0, 4000), agent_summary: String(args.agent_summary || "").slice(0, 500), phase: args.phase || null });
       const pending = steer.get(cid) || steer.get("*") || null;
       if (pending) { steer.delete(cid); steer.delete("*"); append(cid, { type: "steer_delivered", text: pending }); }
@@ -199,7 +199,6 @@ async function dispatch(name, args) {
       out = { operator_instruction: pending, research: lastResearch, conversation_id: cid };
     } else if (name === "research_person") {
       if (args.consent !== true) throw new Error("research_person refused: consent must be true (ask the participant first and only call after a clear yes)");
-      lastActive.id = cid; lastActive.at = Date.now();
       const summary = await research(args);
       append(cid, { type: "research", query: { name: args.name, company: args.company, url: args.url, handle: args.handle }, summary });
       out = { research: summary };
@@ -207,7 +206,6 @@ async function dispatch(name, args) {
       const personal_token = newToken(20);
       const email = String(args.email || "").trim() || null;
       append(cid, { type: "finish", email, name: args.name || null, may_attribute: Boolean(args.may_attribute), consent_research: Boolean(args.consent_research), personal_token });
-      if (lastActive.id === cid) lastActive.id = null;
       setTimeout(() => {
         runReport(cid).then((r) => log({ job: "report", conversation_id: cid, ok: true, ...r }))
           .catch((e) => { log({ job: "report", conversation_id: cid, ok: false, error: String(e.message || e) }); append(cid, { type: "report_error", error: String(e.message || e) }); });
