@@ -175,7 +175,7 @@ async function webResearch({ name, company, context }) {
       model: process.env.RESEARCH_MODEL || "perplexity/sonar",
       max_tokens: 260,
       messages: [
-        { role: "system", content: "You research a person for an interviewer, from public web sources only. Return at most 5 short plain lines: who they are, what they build or do, public roles, notable projects, recent public posts or talks. No markdown, no citations, no speculation. If you cannot find the person with confidence, answer exactly: not found." },
+        { role: "system", content: "You research a person for a phone interviewer, from public web sources only. The name was transcribed from speech and may be misspelled: search the given spelling and close variants (Amin/Emin, Mahrt/Mart/Maart, Jon/John, Meier/Meyer and so on), and use the context to pick the right person. Return at most 5 short plain lines: who they are, what they build or do, public roles, notable projects, recent public posts or talks. Start with the line: match: <name as written online>, <confidence high|medium|low>. No markdown, no citations. If nothing plausible exists, answer exactly: not found." },
         { role: "user", content: who },
       ],
     }),
