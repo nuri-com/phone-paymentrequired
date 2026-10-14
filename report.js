@@ -13,16 +13,6 @@ const elGet = async (path) => {
   return r.json();
 };
 
-// Map a local id (no conv_ prefix) to the real ElevenLabs conversation that was live at that time.
-export async function resolveConversationId(cid, startedIso) {
-  if (/^conv_/.test(cid)) return cid;
-  const list = await elGet("/conversations?page_size=20");
-  const t0 = startedIso ? Date.parse(startedIso) / 1000 : Date.now() / 1000;
-  const cands = (list.conversations || []).filter((c) => c.start_time_unix_secs <= t0 + 5)
-    .sort((a, b) => b.start_time_unix_secs - a.start_time_unix_secs);
-  return cands[0]?.conversation_id || null;
-}
-
 export async function fetchConversation(id, { maxWaitMs = 180000 } = {}) {
   const until = Date.now() + maxWaitMs;
   for (;;) {
@@ -94,9 +84,9 @@ Rules: quotes must be verbatim from Participant lines, never from Interviewer li
 }
 
 export async function runReport(cid, { to = null, print = false, force = false } = {}) {
+  if (!/^conv_[a-z0-9]+$/.test(String(cid))) throw new Error("not an ElevenLabs conversation id (conv_...): " + cid);
   const interview = readInterview(cid);
-  const realId = await resolveConversationId(cid, interview?.started);
-  if (!realId) throw new Error("no ElevenLabs conversation found for " + cid);
+  const realId = cid;
   const conv = await fetchConversation(realId);
   const r = await buildReport(cid, { conv, interview });
   if (interview && !interview.lines.some((l) => l.type === "transcript")) {

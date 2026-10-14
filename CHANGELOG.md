@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.0 (2026-10-14)
+- Security review fixes: SSRF guard for `research_person` (DNS check per hop, pinned address, manual redirects, ports 80/443, 512 KB cap), server-side `consent: true`, strict `conv_` ids (no fallback, no account-wide mapping in `report.js`), 413 on large bodies, 400 on bad steer JSON, security headers, systemd unit runs as `nuri-phone` with sandboxing.
+
 ## v1.0.1 (2026-10-14)
 - Prompt: finish_interview must come before end_call. Simulations still end after the email question (simulate-conversation does not execute MCP tools); verify on a real call.
 - Report: localized contact labels.

@@ -4,13 +4,22 @@ After=network.target
 
 [Service]
 Type=simple
+User=nuri-phone
+Group=nuri-phone
 WorkingDirectory=/opt/nuri-phone
 EnvironmentFile=/opt/nuri-phone/.env
 Environment=PHONE_PORT=4600
 Environment=PHONE_DATA_DIR=/opt/nuri-phone/data
+# repo stays root-owned (root does git pull); let the service user read the sha for /healthz
+Environment=GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/opt/nuri-phone
 ExecStart=/usr/local/bin/node /opt/nuri-phone/server.js
 Restart=on-failure
 RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/nuri-phone/data
 
 [Install]
 WantedBy=multi-user.target
