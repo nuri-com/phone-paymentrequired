@@ -217,7 +217,8 @@ async function dispatch(name, args) {
   const t0 = Date.now();
   let cid = null;
   try {
-    cid = requireCid(args.conversation_id);
+    // research_person only logs; it must work even when the model did not pass the conversation id.
+    cid = name === "research_person" && !/^conv_[a-z0-9]+$/.test(String(args.conversation_id || "")) ? null : requireCid(args.conversation_id);
     let out;
     if (name === "interview_note") {
       append(cid, { type: "turn", person_said: String(args.person_said || "").slice(0, 4000), agent_summary: String(args.agent_summary || "").slice(0, 500), phase: args.phase || null });
@@ -228,7 +229,7 @@ async function dispatch(name, args) {
     } else if (name === "research_person") {
       if (args.consent !== true) throw new Error("research_person refused: consent must be true (ask the participant first and only call after a clear yes)");
       const summary = await research(args);
-      append(cid, { type: "research", query: { name: args.name, company: args.company, context: args.context, url: args.url, handle: args.handle }, summary });
+      if (cid) append(cid, { type: "research", query: { name: args.name, company: args.company, context: args.context, url: args.url, handle: args.handle }, summary });
       out = { research: summary };
     } else if (name === "finish_interview") {
       const personal_token = newToken(20);
