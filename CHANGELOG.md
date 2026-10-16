@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.1 (2026-10-16)
+- Research searchers default to `google/gemini-2.5-flash:online`: `perplexity/sonar` answered "not found" 3/3 on a misheard spelling (Mahrc for Mahrt), gemini:online matched 6/6 in 3 to 5 s. Spelling hint lists phone confusions (C/T, D/T, M/N, B/P).
+
 ## v1.4.0 (2026-10-14)
 - Research fan-out: `research_person` runs 4 `perplexity/sonar` searchers in parallel (identity, public voice, work, money) and folds them with `openai/gpt-4.1-mini` into match + 2 facts + 3 hooks (concrete public things the interviewer can quote). Still async in ElevenLabs, so the talking agent never waits.
 - Prompt: hooks are doors into the arc, one per question, never a list; 15 minutes if they have it, shorter if not.

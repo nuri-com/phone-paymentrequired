@@ -177,7 +177,7 @@ async function orChat(model, system, user, { max_tokens = 220, timeoutMs = 12000
   const j = await r.json();
   return String(j.choices?.[0]?.message?.content || "").replace(/\[\d+\]/g, "").replace(/\*\*/g, "").trim();
 }
-const SPELL = "The name was transcribed from speech and may be misspelled: search the given spelling and close variants (Amin/Emin, Mahrt/Mart/Maart, Jon/John, Meier/Meyer and so on) and use the context to pick the right person. Plain text, no markdown, no citations, max 70 words. If nothing plausible exists answer exactly: not found.";
+const SPELL = "The name was transcribed from speech and may be misspelled: search the given spelling and close variants (Amin/Emin, Mahrt/Mart/Maart/Mahrc, Jon/John, Meier/Meyer; letters like C/T, D/T, M/N, B/P get confused on the phone) and use the context to pick the right person. Plain text, no markdown, no citations, max 70 words. If nothing plausible exists answer exactly: not found.";
 // Fan-out: 4 searchers run in parallel, each with one angle; one fast model folds them into hooks.
 const ANGLES = [
   ["identity", "Who is this person: current role, company, city, one-line background. Start with: match: <name as written online>, <confidence high|medium|low>."],
@@ -187,7 +187,7 @@ const ANGLES = [
 ];
 async function webResearch({ name, company, context }) {
   const who = [name, company, context].filter(Boolean).join(", ");
-  const searchModel = process.env.RESEARCH_MODEL || "perplexity/sonar";
+  const searchModel = process.env.RESEARCH_MODEL || "google/gemini-2.5-flash:online"; // sonar answers "not found" on misheard spellings (Mahrc), gemini:online finds the person
   const t0 = Date.now();
   const found = await Promise.allSettled(ANGLES.map(([, q]) => orChat(searchModel, `You research a person for a phone interviewer, public web sources only. ${q} ${SPELL}`, who, { max_tokens: 160 })));
   const notes = found.map((r, i) => `${ANGLES[i][0]}: ${r.status === "fulfilled" ? r.value : "error " + r.reason?.message}`);
