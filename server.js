@@ -246,7 +246,10 @@ async function dispatch(name, args) {
       if (args.consent !== true) throw new Error("research_person refused: consent must be true (ask the participant first and only call after a clear yes)");
       const summary = await research(args);
       if (cid) append(cid, { type: "research", query: { name: args.name, company: args.company, context: args.context, url: args.url, handle: args.handle }, summary });
-      out = { research: summary };
+      const hit = /^match:/i.test(summary) && !/confidence low|, low\b/i.test(summary);
+      out = { research: summary, instruction: hit
+        ? "Your very next sentence, before anything else: check the match with them in one short sentence (role, company, city: is that you?). If they say yes, from then on bring one hook into a question whenever it fits the thread, quoting where it appeared. Never read the list."
+        : "Nothing usable. Do not mention it. Continue with the arc." };
     } else if (name === "finish_interview") {
       const personal_token = newToken(20);
       const email = String(args.email || "").trim() || null;
