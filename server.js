@@ -73,6 +73,21 @@ const TOOLS = [
     },
   },
   {
+    name: "research_topic",
+    description:
+      "Fast public fact-check on something the participant just mentioned: a person, project, company, product, place, number, date or claim. " +
+      "Call it immediately and silently whenever they mention something you do not know well; never announce it, never wait for it, keep talking. " +
+      "query: 2 to 6 words. Returns up to 3 short facts with source websites, or nothing useful. Use one fact in your next follow-up, naming the website naturally. Never mention this tool or a lookup.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversation_id: { type: "string", description: "Required: the conversation id given in your instructions (starts with conv_)." },
+        query: { type: "string", description: "2-6 words: the person, project, company, number, date or claim to check." },
+      },
+      required: ["conversation_id", "query"],
+    },
+  },
+  {
     name: "finish_interview",
     description:
       "Call once at the end of the conversation, after the closing questions. Before calling: ask whether they want to leave an email so they get a copy of their own interview (optional, read it back once); " +
@@ -229,6 +244,13 @@ async function research({ name, company, url, handle, context }) {
 }
 
 // ---------- tool dispatch ----------
+// Operator steering: any tool call picks up a queued instruction; consumed once, logged into the interview.
+function takeSteer(cid) {
+  if (!cid) return null;
+  const pending = steer.get(cid) || steer.get("*") || null;
+  if (pending) { steer.delete(cid); steer.delete("*"); append(cid, { type: "steer_delivered", text: pending }); }
+  return pending;
+}
 async function dispatch(name, args) {
   const t0 = Date.now();
   let cid = null;
@@ -249,7 +271,19 @@ async function dispatch(name, args) {
       const hit = /^match:/i.test(summary) && !/confidence low|, low\b/i.test(summary);
       out = { research: summary, instruction: hit
         ? "Your very next sentence, before anything else: check the match with them in one short sentence (role, company, city: is that you?). If they say yes, from then on bring one hook into a question whenever it fits the thread, quoting where it appeared. Never read the list."
-        : "Nothing usable. Do not mention it. Continue with the arc." };
+        : "Nothing usable. Do not mention it. Continue with the arc.", operator_instruction: takeSteer(cid) };
+    } else if (name === "research_topic") {
+      const q = String(args.query || "").replace(/\s+/g, " ").trim().slice(0, 120);
+      if (!q) throw new Error("research_topic: query required (2-6 words)");
+      let facts = "", hit = false;
+      try {
+        facts = await orChat(process.env.RESEARCH_MODEL || "google/gemini-2.5-flash:online",
+          "You fact-check one thing a phone interview guest just mentioned, public web sources only. Reply with 1 to 3 short lines: one concrete fact, figure, date or name per line, each ending with its source website in brackets like [wikipedia.org]. If nothing solid exists, reply exactly: nothing useful. Plain text, no markdown, max 45 words.",
+          q, { max_tokens: 110, timeoutMs: 9000 });
+        hit = !/^nothing useful\.?$/i.test(facts.trim());
+      } catch (e) { log({ research: "topic_failed", query: q, error: String(e.message || e) }); }
+      if (cid) append(cid, { type: "topic", query: q, summary: hit ? facts : "nothing useful" });
+      out = { topic: q, ...(hit ? { facts } : {}), operator_instruction: takeSteer(cid) };
     } else if (name === "finish_interview") {
       const personal_token = newToken(20);
       const email = String(args.email || "").trim() || null;

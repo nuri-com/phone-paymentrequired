@@ -32,3 +32,8 @@
 - Own-words report job (`report.js`): ElevenLabs transcript, router LLM quotes verified verbatim, Resend email to support and participant, personal `/i/:token` page.
 - Landing page, `/llms.txt`, `/healthz` with git sha.
 - ElevenLabs scripts: register MCP server "Interview notes", create agent "Research Interview v3", simulate conversations.
+
+## v1.5.0 (2026-10-16)
+- research_topic MCP tool: instant silent fact-check (gemini:online, 9s cap, 45-word facts with source sites) whenever a guest mentions something unknown
+- operator steer now picked up by every tool result (research_person, research_topic), not only interview_note
+- prompt v6: questions under 15 words, zero self-narration, no language switch on one foreign sentence, follow-up craft (Fridman/Shepard style), findings presented as read not as truth
